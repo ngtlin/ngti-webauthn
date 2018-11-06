@@ -36,14 +36,13 @@ router.post('/register', (request, response) => {
       'authenticators': []
   }
 
-
   let challengeMakeCred    = utils.generateServerMakeCredRequest(username, 
     name, database[username].id)
   challengeMakeCred.status = 'ok'
 
   request.session.challenge = challengeMakeCred.challenge;
   request.session.username  = username;
-
+  console.log('-XXX->challengeMakeCred=', challengeMakeCred)
   response.json(challengeMakeCred)
 })
 
@@ -60,9 +59,9 @@ router.post('/response', (request, response) => {
       return
   }
 
-  let webauthnResp = request.body
-  let clientData   = JSON.parse(base64url.decode(webauthnResp.response.clientDataJSON));
-
+  const webauthnResp = request.body
+  const clientData   = JSON.parse(base64url.decode(webauthnResp.response.clientDataJSON));
+  console.log('-XXX->clientData=', clientData);
   /* Check challenge... */
   if(clientData.challenge !== request.session.challenge) {
       response.json({
@@ -81,15 +80,16 @@ router.post('/response', (request, response) => {
 
   let result;
   if(webauthnResp.response.attestationObject !== undefined) {
+    console.log('-XXX->verify Register');
       /* This is create cred */
       result = utils.verifyAuthenticatorAttestationResponse(webauthnResp);
-
       if(result.verified) {
           database[request.session.username].authenticators.push(result.authrInfo);
           database[request.session.username].registered = true
       }
   } else if(webauthnResp.response.authenticatorData !== undefined) {
       /* This is get assertion */
+      console.log('-XXX->verify Login');
       result = utils.verifyAuthenticatorAssertionResponse(webauthnResp, database[request.session.username].authenticators);
   } else {
       response.json({
@@ -99,9 +99,11 @@ router.post('/response', (request, response) => {
   }
 
   if(result.verified) {
+      console.log('-XXX->verification SUCCESS');
       request.session.loggedIn = true;
       response.json({ 'status': 'ok' })
   } else {
+    console.log('-XXX->verification FAILURE');
       response.json({
           'status': 'failed',
           'message': 'Can not authenticate signature!'

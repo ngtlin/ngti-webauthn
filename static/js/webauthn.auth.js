@@ -99,7 +99,9 @@ $('#login').submit(function(event) {
 
     getGetAssertionChallenge({username})
         .then((response) => {
-            let publicKey = preformatGetAssertReq(response);
+            console.log('-XXX->getAssertion response=', response);
+            const publicKey = preformatGetAssertReq(response);
+            console.log('-XXX->Login publicKey=', publicKey);
             return navigator.credentials.get({ publicKey })
         })
         .then((response) => {

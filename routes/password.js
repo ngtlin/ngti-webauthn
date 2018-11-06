@@ -26,7 +26,6 @@ router.post('/register', (request, response) => {
         return
     }
 
-
     database[username] = {
         'password': password,
         'name': name,

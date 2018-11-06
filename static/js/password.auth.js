@@ -27,6 +27,7 @@ $('#register').submit(function(event) {
         if(response.status === 'ok') {
             loadMainContainer()
         } else {
+            console.log(`Server responed with error. The message is: ${response.message}`);
             alert(`Server responed with error. The message is: ${response.message}`);
         }
     })

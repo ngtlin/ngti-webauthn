@@ -6,6 +6,10 @@ const cbor      = require('cbor');
  * U2F Presence constant
  */
 const U2F_USER_PRESENTED = 0x01;
+/**
+ * U2F Verification required constant
+ */
+const U2F_USER_VERIFICATION_REQUIRED = 0x04;
 
 /**
  * Takes signature, data and PEM public key and tries to verify signature
@@ -46,7 +50,7 @@ const generateServerMakeCredRequest = (username, displayName, id) => {
         challenge: randomBase64URLBuffer(32),
 
         rp: {
-            name: "FIDO Examples Corporation"
+            name: "NGTI Webauthn RP"
         },
 
         user: {
@@ -76,7 +80,7 @@ const generateServerGetAssertion = (authenticators) => {
         allowCredentials.push({
               type: 'public-key',
               id: authenticator.credID,
-              transports: ['usb', 'nfc', 'ble']
+              transports: ['internal', 'usb', 'nfc', 'ble']
         })
     }
     return {
@@ -194,23 +198,25 @@ const parseMakeCredAuthData = (buffer) => {
 }
 
 const verifyAuthenticatorAttestationResponse = (webAuthnResponse) => {
-    let attestationBuffer = base64url.toBuffer(webAuthnResponse.response.attestationObject);
-    let ctapMakeCredResp  = cbor.decodeAllSync(attestationBuffer)[0];
+    const attestationBuffer = base64url.toBuffer(webAuthnResponse.response.attestationObject);
+    const ctapMakeCredResp  = cbor.decodeAllSync(attestationBuffer)[0];
+    const authrDataStruct = parseMakeCredAuthData(ctapMakeCredResp.authData);
+    const clientDataHash  = hash(base64url.toBuffer(webAuthnResponse.response.clientDataJSON));
 
+    if(!(authrDataStruct.flags & U2F_USER_PRESENTED))
+        throw new Error('User was NOT presented durring authentication!');
+        
+    const publicKey       = COSEECDHAtoPKCS(authrDataStruct.COSEPublicKey);
+
+    console.log('-XXX->verifyAuthenticatorAttestationResponse, attestation=', attestationBuffer);
+    console.log('-XXX->verifyAuthenticatorAttestationResponse, authData=', authrDataStruct, ', pubKey=', publicKey);
     let response = {'verified': false};
     if(ctapMakeCredResp.fmt === 'fido-u2f') {
-        let authrDataStruct = parseMakeCredAuthData(ctapMakeCredResp.authData);
+        const reservedByte    = Buffer.from([0x00]);
+        const signatureBase   = Buffer.concat([reservedByte, authrDataStruct.rpIdHash, clientDataHash, authrDataStruct.credID, publicKey]);
 
-        if(!(authrDataStruct.flags & U2F_USER_PRESENTED))
-            throw new Error('User was NOT presented durring authentication!');
-
-        let clientDataHash  = hash(base64url.toBuffer(webAuthnResponse.response.clientDataJSON))
-        let reservedByte    = Buffer.from([0x00]);
-        let publicKey       = COSEECDHAtoPKCS(authrDataStruct.COSEPublicKey)
-        let signatureBase   = Buffer.concat([reservedByte, authrDataStruct.rpIdHash, clientDataHash, authrDataStruct.credID, publicKey]);
-
-        let PEMCertificate = ASN1toPEM(ctapMakeCredResp.attStmt.x5c[0]);
-        let signature      = ctapMakeCredResp.attStmt.sig;
+        const PEMCertificate = ASN1toPEM(ctapMakeCredResp.attStmt.x5c[0]);
+        const signature      = ctapMakeCredResp.attStmt.sig;
 
         response.verified = verifySignature(signature, signatureBase, PEMCertificate)
 
@@ -222,6 +228,59 @@ const verifyAuthenticatorAttestationResponse = (webAuthnResponse) => {
                 credID: base64url.encode(authrDataStruct.credID)
             }
         }
+    } else if (ctapMakeCredResp.fmt === 'packed') {
+        //1. Let authenticatorData denote the authenticator data for the attestation, and let 
+        //   clientDataHash denote the hash of the serialized client data.
+        //2. If Basic or AttCA attestation is in use, the authenticator produces the sig by 
+        //   concatenating authenticatorData and clientDataHash, and signing the result using an 
+        //   attestation private key selected through an authenticator-specific mechanism. It sets
+        //   x5c to the certificate chain of the attestation public key and alg to the algorithm 
+        //   of the attestation private key.
+        //3. If ECDAA is in use, the authenticator produces sig by concatenating authenticatorData
+        //   and clientDataHash, and signing the result using ECDAA-Sign (see section 3.5 of [FIDOEcdaaAlgorithm])
+        //   after selecting an ECDAA-Issuer public key related to the ECDAA signature private key
+        //   through an authenticator-specific mechanism (see [FIDOEcdaaAlgorithm]). It sets alg to
+        //   the algorithm of the selected ECDAA-Issuer public key and ecdaaKeyId to the identifier
+        //   of the ECDAA-Issuer public key (see above).
+        //4. If self attestation is in use, the authenticator produces sig by concatenating authenticatorData
+        //   and clientDataHash, and signing the result using the credential private key. It sets alg to
+        //   the algorithm of the credential private key and omits the other fields.
+        console.log('-XXX->attestation statement fmt PACKED! attStmt=', ctapMakeCredResp.attStmt);
+        const x5Certficates = ctapMakeCredResp.attStmt.x5c;
+        const ecdaaKeyId = ctapMakeCredResp.attStmt.ecdaaKeyId;
+        if (x5Certficates && x5Certficates.length > 0) {
+            // Verify X5c Signature
+            console.log('-XXX->Verify X5c Signature, TO BE IMPLEMENTED!');
+        } else if (ecdaaKeyId) {
+            // Verify ECDAA Signature
+            console.log('-XXX->Verify ECDAA Signature, TO BE IMPLEMENTED!');
+        } else {
+            // Self Attestation
+            //1. Validate that alg matches the algorithm of the credentialPublicKey in authenticatorData.
+            //2. Verify that sig is a valid signature over the concatenation of authenticatorData and
+            //   clientDataHash using the credential public key with alg.
+            //If successful, return attestation type Self and empty attestation trust path.
+            const sigAlgId = ctapMakeCredResp.attStmt.alg;
+            console.log('-XXX->encoded with sigAlgId=', sigAlgId);
+            if (sigAlgId === -7) {
+                console.log('ES256 algorithm');
+            }
+            const alg = cbor.decodeAllSync(authrDataStruct.COSEPublicKey)[3];
+            console.log('-XXX->decoded algId=', alg);
+            const signature = ctapMakeCredResp.attStmt.sig;
+            const signatureBase = Buffer.concat([ctapMakeCredResp.authData, clientDataHash]);
+            response.verified = verifySignature(signature, signatureBase, ASN1toPEM(publicKey));
+            if(response.verified) {
+                response.authrInfo = {
+                    fmt: 'packed',
+                    publicKey: base64url.encode(publicKey),
+                    counter: authrDataStruct.counter,
+                    credID: base64url.encode(authrDataStruct.credID)
+                }
+            }
+        }
+    } else {
+        console.log('-XXX->attestation statement fmt=', ctapMakeCredResp.fmt, ' NOT YET SUPPORTED!');
     }
 
     return response
@@ -258,24 +317,25 @@ const parseGetAssertAuthData = (buffer) => {
 }
 
 const verifyAuthenticatorAssertionResponse = (webAuthnResponse, authenticators) => {
-    let authr = findAuthr(webAuthnResponse.id, authenticators);
-    let authenticatorData = base64url.toBuffer(webAuthnResponse.response.authenticatorData);
+    console.log('-XXX->verifyAuthenticatorAssertionResponse');
+    const authr = findAuthr(webAuthnResponse.id, authenticators);
+    const authenticatorData = base64url.toBuffer(webAuthnResponse.response.authenticatorData);
 
     let response = {'verified': false};
-    if(authr.fmt === 'fido-u2f') {
+    if(authenticatorData) {
         let authrDataStruct  = parseGetAssertAuthData(authenticatorData);
-
+        console.log('-XXX->authData, ', authrDataStruct);
         if(!(authrDataStruct.flags & U2F_USER_PRESENTED))
             throw new Error('User was NOT presented durring authentication!');
 
-        let clientDataHash   = hash(base64url.toBuffer(webAuthnResponse.response.clientDataJSON))
-        let signatureBase    = Buffer.concat([authrDataStruct.rpIdHash, authrDataStruct.flagsBuf, authrDataStruct.counterBuf, clientDataHash]);
+        const clientDataHash   = hash(base64url.toBuffer(webAuthnResponse.response.clientDataJSON))
+        const signatureBase    = Buffer.concat([authenticatorData, clientDataHash]);
 
-        let publicKey = ASN1toPEM(base64url.toBuffer(authr.publicKey));
-        let signature = base64url.toBuffer(webAuthnResponse.response.signature);
+        const publicKey = ASN1toPEM(base64url.toBuffer(authr.publicKey));
+        const signature = base64url.toBuffer(webAuthnResponse.response.signature);
 
-        response.verified = verifySignature(signature, signatureBase, publicKey)
-
+        console.log('-XXX->verifySignature, publicKey=', publicKey);
+        response.verified = verifySignature(signature, signatureBase, publicKey);
         if(response.verified) {
             if(response.counter <= authr.counter)
                 throw new Error('Authenticator counter did not increase!');
