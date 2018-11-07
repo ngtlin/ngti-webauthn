@@ -183,16 +183,16 @@ const ASN1toPEM = (pkBuffer) => {
  * @return {Object}        - parsed authenticatorData struct
  */
 const parseMakeCredAuthData = (buffer) => {
-    let rpIdHash      = buffer.slice(0, 32);          buffer = buffer.slice(32);
-    let flagsBuf      = buffer.slice(0, 1);           buffer = buffer.slice(1);
-    let flags         = flagsBuf[0];
-    let counterBuf    = buffer.slice(0, 4);           buffer = buffer.slice(4);
-    let counter       = counterBuf.readUInt32BE(0);
-    let aaguid        = buffer.slice(0, 16);          buffer = buffer.slice(16);
-    let credIDLenBuf  = buffer.slice(0, 2);           buffer = buffer.slice(2);
-    let credIDLen     = credIDLenBuf.readUInt16BE(0);
-    let credID        = buffer.slice(0, credIDLen);   buffer = buffer.slice(credIDLen);
-    let COSEPublicKey = buffer;
+    const rpIdHash      = buffer.slice(0, 32);          buffer = buffer.slice(32);
+    const flagsBuf      = buffer.slice(0, 1);           buffer = buffer.slice(1);
+    const flags         = flagsBuf[0];
+    const counterBuf    = buffer.slice(0, 4);           buffer = buffer.slice(4);
+    const counter       = counterBuf.readUInt32BE(0);
+    const aaguid        = buffer.slice(0, 16);          buffer = buffer.slice(16);
+    const credIDLenBuf  = buffer.slice(0, 2);           buffer = buffer.slice(2);
+    const credIDLen     = credIDLenBuf.readUInt16BE(0);
+    const credID        = buffer.slice(0, credIDLen);   buffer = buffer.slice(credIDLen);
+    const COSEPublicKey = buffer;
 
     return {rpIdHash, flagsBuf, flags, counter, counterBuf, aaguid, credID, COSEPublicKey}
 }
@@ -204,7 +204,7 @@ const verifyAuthenticatorAttestationResponse = (webAuthnResponse) => {
     const clientDataHash  = hash(base64url.toBuffer(webAuthnResponse.response.clientDataJSON));
 
     if(!(authrDataStruct.flags & U2F_USER_PRESENTED))
-        throw new Error('User was NOT presented durring authentication!');
+        throw new Error('User was NOT presented during authentication!');
         
     const publicKey       = COSEECDHAtoPKCS(authrDataStruct.COSEPublicKey);
 
@@ -261,12 +261,21 @@ const verifyAuthenticatorAttestationResponse = (webAuthnResponse) => {
             //   clientDataHash using the credential public key with alg.
             //If successful, return attestation type Self and empty attestation trust path.
             const sigAlgId = ctapMakeCredResp.attStmt.alg;
-            console.log('-XXX->encoded with sigAlgId=', sigAlgId);
-            if (sigAlgId === -7) {
-                console.log('ES256 algorithm');
+            /**
+             * COSE_Key = {
+                    1 => tstr / int,          ; kty
+                    ? 2 => bstr,              ; kid
+                    ? 3 => tstr / int,        ; alg
+                    ? 4 => [+ (tstr / int) ], ; key_ops
+                    ? 5 => bstr,              ; Base IV
+                    * label => values
+                }
+             */
+            const alg = cbor.decodeAllSync(authrDataStruct.COSEPublicKey)[0].get(3);
+            if (sigAlgId !== alg) {
+                throw new Error('Signalled algorithm does not match with algorithm used to encrpt public key!');
             }
-            const alg = cbor.decodeAllSync(authrDataStruct.COSEPublicKey)[3];
-            console.log('-XXX->decoded algId=', alg);
+
             const signature = ctapMakeCredResp.attStmt.sig;
             const signatureBase = Buffer.concat([ctapMakeCredResp.authData, clientDataHash]);
             response.verified = verifySignature(signature, signatureBase, ASN1toPEM(publicKey));
