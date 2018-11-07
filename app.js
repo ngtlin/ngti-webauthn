@@ -32,6 +32,14 @@ app.use('/', defaultroutes)
 app.use('/password', passwordauth)
 app.use('/webauthn', webuathnauth)
 
+/* ----- redirect to https ----- */
+app.use(function(req, res, next) {
+  if ((req.get('X-Forwarded-Proto') !== 'https')) {
+    res.redirect('https://' + req.get('Host') + req.url);
+  } else
+    next();
+});
+
 const defaultPort = config.port || 5000;
 const port = process.env.PORT || defaultPort;
 app.listen(port);
