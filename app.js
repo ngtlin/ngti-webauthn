@@ -32,7 +32,8 @@ app.use('/', defaultroutes)
 app.use('/password', passwordauth)
 app.use('/webauthn', webuathnauth)
 
-const port = config.port || 8443;
+const defaultPort = config.port || 5000;
+const port = process.env.PORT || defaultPort;
 app.listen(port);
 console.log(`Started app on port ${port}`);
 
