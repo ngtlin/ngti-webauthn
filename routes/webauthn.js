@@ -54,9 +54,8 @@ router.post('/response', (request, response) => {
       response.json({
           'status': 'failed',
           'message': 'Response missing one or more of id/rawId/response/type fields, or type is not public-key!'
-      })
-
-      return
+      });
+      return;
   }
 
   const webauthnResp = request.body
@@ -67,15 +66,19 @@ router.post('/response', (request, response) => {
       response.json({
           'status': 'failed',
           'message': 'Challenges don\'t match!'
-      })
+      });
+      return;
   }
 
   /* ...and origin */
-  if(clientData.origin !== config.origin) {
+  const allowedOrigin = process.env.ORIGIN || config.origin;
+  console.log('-XXX->Allowed Origin: ', allowedOrigin);
+  if(clientData.origin !== allowedOrigin) {
       response.json({
           'status': 'failed',
           'message': 'Origins don\'t match!'
-      })
+      });
+      return;
   }
 
   let result;
